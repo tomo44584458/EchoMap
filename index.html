@@ -189,32 +189,82 @@
           },
         ];
 
+        const mapElement = document.querySelector("#map");
+        const worldBounds = L.latLngBounds([
+          [-85.05112878, -180],
+          [85.05112878, 180],
+        ]);
+
+        function calculateSingleWorldZoom() {
+          // Webメルカトル地図は「256px × 2^zoom」の正方形です。画面より世界地図が
+          // 小さいzoomを許すと、Leafletが右隣に世界のコピーを描き、つなぎ目が不自然に
+          // 見えます。画面を覆える最小の整数zoomを下限にして、世界のコピーを出しません。
+          const width = mapElement?.clientWidth || window.innerWidth;
+          const height = mapElement?.clientHeight || window.innerHeight;
+          const longestSide = Math.max(width, height);
+          return Math.max(2, Math.ceil(Math.log2(longestSide / 256)));
+        }
+
+        const initialZoom = calculateSingleWorldZoom();
         const map = L.map("map", {
           zoomControl: false,
-          worldCopyJump: true,
-        }).setView([25, 10], 2.4);
+          maxBounds: worldBounds,
+          maxBoundsViscosity: 1,
+          minZoom: initialZoom,
+          zoomSnap: 1,
+          zoomDelta: 1,
+        }).setView([25, 10], initialZoom);
 
         L.control.zoom({ position: "bottomright" }).addTo(map);
 
         // CartoDB.DarkMatterタイルで、画面いっぱいのダークモード地図を表示します。
-        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+        const baseTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
           attribution:
             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+          bounds: worldBounds,
+          keepBuffer: 6,
           maxZoom: 19,
+          noWrap: true,
+          updateWhenIdle: false,
+          updateWhenZooming: false,
         }).addTo(map);
 
+        const tileRetryCounts = new WeakMap();
+        baseTiles.on("tileerror", (event) => {
+          const retryCount = tileRetryCounts.get(event.tile) || 0;
+          if (retryCount >= 2) return;
+
+          tileRetryCounts.set(event.tile, retryCount + 1);
+          window.setTimeout(() => {
+            const retryUrl = new URL(event.tile.src);
+            retryUrl.searchParams.set("retry", `${Date.now()}-${retryCount + 1}`);
+            event.tile.src = retryUrl.toString();
+          }, 350 * (retryCount + 1));
+        });
+
+        function applyResponsiveZoomFloor() {
+          const nextMinZoom = calculateSingleWorldZoom();
+          map.setMinZoom(nextMinZoom);
+
+          if (map.getZoom() < nextMinZoom) {
+            map.setZoom(nextMinZoom, { animate: false });
+          }
+        }
+
         function refreshMapLayout() {
-          // 初期表示時にブラウザがまだレイアウト計算中だと、Leafletが地図コンテナを
-          // 小さく見積もって一部のタイルだけを読み込むことがあります。resize通知と
-          // invalidateSizeで実サイズを再計算させ、歯抜け表示を防ぎます。
-          window.dispatchEvent(new Event("resize"));
-          map.invalidateSize();
+          // 初期表示時や画面回転時にブラウザがまだレイアウト計算中だと、Leafletが地図
+          // コンテナを小さく見積もって一部のタイルだけを読み込むことがあります。実サイズ
+          // を再計算し、世界地図1枚で画面を覆えるzoom下限も更新して歯抜けと継ぎ目を防ぎます。
+          applyResponsiveZoomFloor();
+          map.invalidateSize({ pan: false });
+          map.panInsideBounds(worldBounds, { animate: false });
         }
 
         requestAnimationFrame(refreshMapLayout);
         window.addEventListener("load", refreshMapLayout);
-        window.addEventListener("resize", () => map.invalidateSize());
+        window.addEventListener("resize", refreshMapLayout);
         setTimeout(refreshMapLayout, 250);
+        setTimeout(refreshMapLayout, 750);
 
         const audio = new Audio();
         audio.preload = "none";
