@@ -59,7 +59,39 @@
         font-size: 15px;
         height: 34px;
         justify-content: center;
+        position: relative;
         width: 34px;
+      }
+
+      /* 再生中のピンだけ、水色の円が外へ広がる波紋エフェクトを重ねます。 */
+      .sound-marker.is-playing .pulse-pin::before,
+      .sound-marker.is-playing .pulse-pin::after {
+        animation: playing-ripple 1.8s cubic-bezier(0.2, 0.7, 0.2, 1) infinite;
+        border: 2px solid rgba(0, 229, 255, 0.72);
+        border-radius: 9999px;
+        box-shadow: 0 0 24px rgba(0, 229, 255, 0.45);
+        content: "";
+        inset: -8px;
+        opacity: 0;
+        pointer-events: none;
+        position: absolute;
+      }
+
+      .sound-marker.is-playing .pulse-pin::after {
+        animation-delay: 0.9s;
+      }
+
+      @keyframes playing-ripple {
+        0% {
+          opacity: 0.75;
+          transform: scale(0.65);
+        }
+
+        70%,
+        100% {
+          opacity: 0;
+          transform: scale(2.25);
+        }
       }
 
       input[type="range"] {
@@ -206,9 +238,10 @@
 
         let currentSpot = null;
         let lastRandomIndex = -1;
+        const spotMarkers = new Map();
 
         const pinIcon = L.divIcon({
-          className: "",
+          className: "sound-marker",
           html: '<div class="pulse-pin">◉</div>',
           iconSize: [34, 34],
           iconAnchor: [17, 17],
@@ -217,13 +250,21 @@
 
         // ピンをクリックしたらselectSpotを呼び、前の音を止めて新しい音を再生します。
         audioSpots.forEach((spot) => {
-          L.marker(spot.coordinates, { icon: pinIcon })
+          const marker = L.marker(spot.coordinates, { icon: pinIcon })
             .addTo(map)
             .bindPopup(
               `<strong>${spot.city}</strong><br><span>${spot.station}</span><br><small>${spot.country}</small><br><a class="text-cyan-200 underline" href="${spot.sourceUrl}" target="_blank" rel="noopener noreferrer">配信元を見る</a>`,
             )
             .on("click", () => selectSpot(spot, true));
+
+          spotMarkers.set(spot, marker);
         });
+
+        function setPlayingMarker(playingSpot) {
+          spotMarkers.forEach((marker, spot) => {
+            marker.getElement()?.classList.toggle("is-playing", spot === playingSpot);
+          });
+        }
 
         function updateStatus(text, styleClass) {
           statusBadge.textContent = text;
@@ -240,6 +281,7 @@
           currentSpot = spot;
           updateNowPlaying(spot);
           message.textContent = `${spot.city} のライブ音源に接続しています。`;
+          setPlayingMarker(null);
 
           // srcを差し替える前に必ず停止し、同時に2つの音が鳴らないようにします。
           audio.pause();
@@ -264,11 +306,13 @@
             await audio.play();
             updateStatus("Live", "bg-emerald-400/20 text-emerald-100");
             toggleButton.textContent = "⏸ Stop";
+            setPlayingMarker(currentSpot);
             message.textContent = `${currentSpot.city} の ${currentSpot.station} を再生中です。`;
           } catch (error) {
             // ブラウザの自動再生制限や、放送局側の一時停止に備えてメッセージを出します。
             updateStatus("Blocked", "bg-rose-500/20 text-rose-100");
             toggleButton.textContent = "▶ Play";
+            setPlayingMarker(null);
             message.textContent =
               "再生できませんでした。もう一度Playを押すか、別の都市を試してください。";
             console.error("Audio playback failed:", error);
@@ -277,6 +321,7 @@
 
         function stopAudio() {
           audio.pause();
+          setPlayingMarker(null);
           updateStatus("Paused", "bg-slate-800 text-slate-300");
           toggleButton.textContent = "▶ Play";
           message.textContent = currentSpot
@@ -314,6 +359,7 @@
         audio.addEventListener("playing", () => {
           updateStatus("Live", "bg-emerald-400/20 text-emerald-100");
           toggleButton.textContent = "⏸ Stop";
+          setPlayingMarker(currentSpot);
         });
 
         audio.addEventListener("waiting", () => {
@@ -321,6 +367,8 @@
         });
 
         audio.addEventListener("pause", () => {
+          setPlayingMarker(null);
+
           if (currentSpot) {
             updateStatus("Paused", "bg-slate-800 text-slate-300");
           }
@@ -328,6 +376,7 @@
 
         audio.addEventListener("error", () => {
           updateStatus("Error", "bg-rose-500/20 text-rose-100");
+          setPlayingMarker(null);
           message.textContent = "音声ストリームでエラーが発生しました。別の都市も試してみてください。";
           toggleButton.textContent = "▶ Play";
         });
