@@ -7,24 +7,36 @@
 
     <!-- GitHub Pagesでそのまま動かせるように、CSS/JSはCDNから読み込みます。 -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIINfQMcQPkGFg1q9dJxqH4HLyA6xXb8PUM="
-      crossorigin=""
-    />
-    <script
-      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-      crossorigin=""
-      defer
-    ></script>
+    <!--
+      Leaflet CSS
+      integrity属性の値がCDN側の実体とズレるとブラウザにブロックされるため、
+      今回は integrity / crossorigin を外しています。
+    -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!--
+      Leaflet JS
+      CSS側と同じく、CDN読み込み時のintegrity不一致を避けるため、
+      integrity / crossorigin を外しています。
+    -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 
     <style>
       html,
-      body,
-      #map {
+      body {
         height: 100%;
+      }
+
+      #map {
+        height: 100vh;
+        left: 0;
+        position: absolute;
+        top: 0;
+        width: 100vw;
+        z-index: 0;
+      }
+
+      .control-panel {
+        z-index: 10;
       }
 
       body {
@@ -33,6 +45,19 @@
         background: #020617;
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
           "Segoe UI", sans-serif;
+      }
+
+      /*
+        Tailwindやブラウザ側のCSSリセットで img { max-width: 100%; } が効くと、
+        Leafletの地図タイル画像のサイズ計算が崩れることがあります。
+        タイル歯抜け・ズレ対策として、Leaflet内の画像は本来サイズで表示させます。
+      */
+      .leaflet-container img {
+        max-width: none;
+      }
+
+      .leaflet-tile {
+        max-width: none !important;
       }
 
       /* Leafletのポップアップもアプリ全体のダークな雰囲気に合わせます。 */
@@ -105,7 +130,7 @@
 
       <!-- 半透明のコントロールパネル。スマホでは下部、PCでは左上に固定します。 -->
       <section
-        class="absolute inset-x-4 bottom-4 z-[1000] rounded-3xl border border-white/15 bg-slate-950/75 p-5 text-white shadow-2xl shadow-cyan-950/40 backdrop-blur-xl md:bottom-auto md:left-6 md:right-auto md:top-6 md:w-[380px]"
+        class="control-panel absolute inset-x-4 bottom-4 rounded-3xl border border-white/15 bg-slate-950/75 p-5 text-white shadow-2xl shadow-cyan-950/40 backdrop-blur-xl md:bottom-auto md:left-6 md:right-auto md:top-6 md:w-[380px]"
         aria-label="再生コントロール"
       >
         <div class="mb-5 flex items-start justify-between gap-4">
@@ -157,6 +182,12 @@
 
     <script>
       window.addEventListener("DOMContentLoaded", () => {
+        // Leaflet本体がCDNから読み込めなかった場合の保険です。
+        if (typeof L === "undefined") {
+          console.error("Leafletが読み込めていません。CDNの読み込み状況を確認してください。");
+          return;
+        }
+
         // 都市データはここにまとめています。新しい音源を足すときは、この配列に1件追加するだけです。
         const audioSpots = [
           {
@@ -209,19 +240,84 @@
           },
         ];
 
+        const mapElement = document.querySelector("#map");
+        const worldBounds = L.latLngBounds([
+          [-85.05112878, -180],
+          [85.05112878, 180],
+        ]);
+
+        function calculateSingleWorldZoom() {
+          // Webメルカトル地図は「256px × 2^zoom」の正方形です。画面より世界地図が
+          // 小さいzoomを許すと、Leafletが右隣に世界のコピーを描き、つなぎ目が不自然に
+          // 見えます。画面を覆える最小の整数zoomを下限にして、世界のコピーを出しません。
+          const width = mapElement?.clientWidth || window.innerWidth;
+          const height = mapElement?.clientHeight || window.innerHeight;
+          const longestSide = Math.max(width, height);
+
+          return Math.max(2, Math.ceil(Math.log2(longestSide / 256)));
+        }
+
+        const initialZoom = calculateSingleWorldZoom();
         const map = L.map("map", {
           zoomControl: false,
-          worldCopyJump: true,
-        }).setView([25, 10], 2.4);
+          maxBounds: worldBounds,
+          maxBoundsViscosity: 1,
+          minZoom: initialZoom,
+          zoomSnap: 1,
+          zoomDelta: 1,
+        }).setView([25, 10], initialZoom);
 
         L.control.zoom({ position: "bottomright" }).addTo(map);
 
         // CartoDB.DarkMatterタイルで、画面いっぱいのダークモード地図を表示します。
-        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+        const baseTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
           attribution:
             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+          bounds: worldBounds,
+          keepBuffer: 6,
           maxZoom: 19,
+          noWrap: true,
+          updateWhenIdle: false,
+          updateWhenZooming: false,
         }).addTo(map);
+
+        const tileRetryCounts = new WeakMap();
+        baseTiles.on("tileerror", (event) => {
+          const retryCount = tileRetryCounts.get(event.tile) || 0;
+
+          if (retryCount >= 2) return;
+
+          tileRetryCounts.set(event.tile, retryCount + 1);
+          window.setTimeout(() => {
+            const retryUrl = new URL(event.tile.src);
+            retryUrl.searchParams.set("retry", `${Date.now()}-${retryCount + 1}`);
+            event.tile.src = retryUrl.toString();
+          }, 350 * (retryCount + 1));
+        });
+
+        function applyResponsiveZoomFloor() {
+          const nextMinZoom = calculateSingleWorldZoom();
+          map.setMinZoom(nextMinZoom);
+
+          if (map.getZoom() < nextMinZoom) {
+            map.setZoom(nextMinZoom, { animate: false });
+          }
+        }
+
+        function refreshMapLayout() {
+          // 初期表示時や画面回転時にブラウザがまだレイアウト計算中だと、Leafletが地図
+          // コンテナを小さく見積もって一部のタイルだけを読み込むことがあります。実サイズ
+          // を再計算し、世界地図1枚で画面を覆えるzoom下限も更新して歯抜けと継ぎ目を防ぎます。
+          applyResponsiveZoomFloor();
+          map.invalidateSize({ pan: false });
+          map.panInsideBounds(worldBounds, { animate: false });
+        }
+
+        requestAnimationFrame(refreshMapLayout);
+        window.addEventListener("load", refreshMapLayout);
+        window.addEventListener("resize", refreshMapLayout);
+        setTimeout(refreshMapLayout, 250);
+        setTimeout(refreshMapLayout, 750);
 
         const audio = new Audio();
         audio.preload = "none";
@@ -380,6 +476,10 @@
           message.textContent = "音声ストリームでエラーが発生しました。別の都市も試してみてください。";
           toggleButton.textContent = "▶ Play";
         });
+
+        setTimeout(() => {
+          map.invalidateSize();
+        }, 500);
       });
     </script>
   </body>
