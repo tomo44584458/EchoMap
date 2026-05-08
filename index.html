@@ -191,6 +191,19 @@
           maxZoom: 19,
         }).addTo(map);
 
+        function refreshMapLayout() {
+          // 初期表示時にブラウザがまだレイアウト計算中だと、Leafletが地図コンテナを
+          // 小さく見積もって一部のタイルだけを読み込むことがあります。resize通知と
+          // invalidateSizeで実サイズを再計算させ、歯抜け表示を防ぎます。
+          window.dispatchEvent(new Event("resize"));
+          map.invalidateSize();
+        }
+
+        requestAnimationFrame(refreshMapLayout);
+        window.addEventListener("load", refreshMapLayout);
+        window.addEventListener("resize", () => map.invalidateSize());
+        setTimeout(refreshMapLayout, 250);
+
         const audio = new Audio();
         audio.preload = "none";
         audio.volume = 0.7;
