@@ -7,36 +7,11 @@
 
     <!-- GitHub Pagesでそのまま動かせるように、CSS/JSはCDNから読み込みます。 -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIINfQMcQPkGFg1q9dJxqH4HLyA6xXb8PUM="
-      crossorigin=""
-    />
-    <script
-      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-      crossorigin=""
-      defer
-    ></script>
 
     <style>
       html,
       body {
         height: 100%;
-      }
-
-      #map {
-        width: 100vw;
-        height: 100vh;
-        position: absolute;
-        top: 0;
-        left: 0;
-        z-index: 0;
-      }
-
-      .control-panel {
-        z-index: 10;
       }
 
       body {
@@ -47,91 +22,341 @@
           "Segoe UI", sans-serif;
       }
 
-      /* Leafletのポップアップもアプリ全体のダークな雰囲気に合わせます。 */
-      .leaflet-popup-content-wrapper,
-      .leaflet-popup-tip {
-        background: rgba(15, 23, 42, 0.95);
-        color: #e2e8f0;
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+      .app-shell {
+        display: grid;
+        grid-template-columns: minmax(320px, 625px) minmax(0, 1fr);
+        height: 100%;
+        width: 100%;
       }
 
-      .leaflet-popup-content {
-        margin: 14px 16px;
-      }
-
-      /* ピンを少し光らせ、夜の地図上でも見つけやすくします。 */
-      .pulse-pin {
-        align-items: center;
-        background: linear-gradient(135deg, #22d3ee, #a78bfa);
-        border: 2px solid rgba(255, 255, 255, 0.9);
-        border-radius: 9999px;
-        box-shadow: 0 0 0 8px rgba(34, 211, 238, 0.12), 0 12px 30px rgba(14, 165, 233, 0.35);
-        color: #0f172a;
+      .control-column {
+        align-items: start;
+        border-right: 2px solid rgba(248, 113, 113, 0.45);
         display: flex;
-        font-size: 15px;
-        height: 34px;
+        padding: 22px 24px;
+        position: relative;
+        z-index: 10;
+      }
+
+      .control-column::after {
+        background: linear-gradient(180deg, #ef4444, #f97316 55%, #ef4444);
+        border-radius: 9999px;
+        box-shadow: 0 0 18px rgba(239, 68, 68, 0.45);
+        content: "";
+        position: absolute;
+        right: -5px;
+        top: 20px;
+        bottom: 28px;
+        width: 5px;
+      }
+
+      .control-panel {
+        width: min(100%, 572px);
+      }
+
+      .map-stage {
+        background:
+          radial-gradient(circle at 50% 50%, rgba(8, 47, 73, 0.22), transparent 42%),
+          linear-gradient(135deg, #020617 0%, #030712 52%, #08111f 100%);
+        min-width: 0;
+        overflow: hidden;
+        position: relative;
+      }
+
+      .map-stage::before {
+        background-image:
+          linear-gradient(rgba(34, 211, 238, 0.045) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(34, 211, 238, 0.045) 1px, transparent 1px);
+        background-size: 68px 68px;
+        content: "";
+        inset: 0;
+        mask-image: radial-gradient(circle at 50% 50%, #000 0 62%, transparent 82%);
+        opacity: 0.65;
+        position: absolute;
+      }
+
+      .world-map-panel {
+        aspect-ratio: 2 / 1;
+        left: 50%;
+        max-height: min(82vh, 720px);
+        max-width: min(92%, 1280px);
+        min-width: min(92%, 680px);
+        position: absolute;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: 88%;
+      }
+
+      .world-map {
+        background:
+          radial-gradient(circle at 50% 50%, rgba(14, 165, 233, 0.12), transparent 62%),
+          linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(2, 6, 23, 0.92));
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 32px;
+        box-shadow:
+          inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+          0 30px 90px rgba(8, 47, 73, 0.35);
+        height: 100%;
+        overflow: hidden;
+        position: relative;
+        width: 100%;
+      }
+
+      .world-map::before {
+        background-image:
+          linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+        background-size: 12.5% 25%;
+        content: "";
+        inset: 0;
+        position: absolute;
+      }
+
+      .world-map svg {
+        display: block;
+        filter: drop-shadow(0 16px 22px rgba(0, 0, 0, 0.28));
+        height: 100%;
+        position: absolute;
+        width: 100%;
+      }
+
+      .land {
+        fill: rgba(30, 41, 59, 0.96);
+        stroke: rgba(103, 232, 249, 0.16);
+        stroke-width: 0.8;
+      }
+
+      .country-line {
+        fill: none;
+        stroke: rgba(148, 163, 184, 0.12);
+        stroke-width: 0.45;
+      }
+
+      .map-pin {
+        align-items: center;
+        background: transparent;
+        border: 0;
+        color: #0f172a;
+        cursor: pointer;
+        display: flex;
+        height: 46px;
         justify-content: center;
-        width: 34px;
+        padding: 0;
+        position: absolute;
+        transform: translate(-50%, -100%);
+        transition: transform 180ms ease, filter 180ms ease;
+        width: 46px;
+        z-index: 3;
+      }
+
+      .map-pin::before {
+        background: linear-gradient(135deg, #22d3ee, #a78bfa);
+        border: 2px solid rgba(255, 255, 255, 0.92);
+        border-radius: 9999px 9999px 9999px 0;
+        box-shadow: 0 0 0 8px rgba(34, 211, 238, 0.12), 0 14px 28px rgba(14, 165, 233, 0.32);
+        content: "";
+        height: 30px;
+        position: absolute;
+        transform: rotate(-45deg);
+        width: 30px;
+      }
+
+      .map-pin::after {
+        background: #020617;
+        border-radius: 9999px;
+        content: "";
+        height: 9px;
+        position: absolute;
+        top: 10px;
+        width: 9px;
+      }
+
+      .map-pin:hover,
+      .map-pin:focus-visible,
+      .map-pin.is-active {
+        filter: brightness(1.18);
+        transform: translate(-50%, -100%) scale(1.12);
+      }
+
+      .map-pin.is-active::before {
+        animation: activePulse 1.45s ease-out infinite;
+        background: linear-gradient(135deg, #67e8f9, #f0abfc);
+        box-shadow: 0 0 0 12px rgba(34, 211, 238, 0.14), 0 18px 34px rgba(168, 85, 247, 0.38);
+      }
+
+      .map-tooltip {
+        background: rgba(15, 23, 42, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 14px;
+        bottom: calc(100% + 8px);
+        box-shadow: 0 16px 32px rgba(0, 0, 0, 0.32);
+        color: #e2e8f0;
+        left: 50%;
+        min-width: 170px;
+        opacity: 0;
+        padding: 10px 12px;
+        pointer-events: none;
+        position: absolute;
+        text-align: left;
+        transform: translateX(-50%) translateY(6px);
+        transition: opacity 160ms ease, transform 160ms ease;
+      }
+
+      .map-pin:hover .map-tooltip,
+      .map-pin:focus-visible .map-tooltip,
+      .map-pin.is-active .map-tooltip {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+
+      .spot-link {
+        color: #a5f3fc;
+        text-decoration: underline;
+      }
+
+      .map-caption {
+        bottom: 24px;
+        color: rgba(226, 232, 240, 0.72);
+        font-size: 0.85rem;
+        left: 50%;
+        position: absolute;
+        text-align: center;
+        transform: translateX(-50%);
+        width: min(92%, 820px);
       }
 
       input[type="range"] {
         accent-color: #22d3ee;
       }
+
+      @keyframes activePulse {
+        0% {
+          box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.28), 0 18px 34px rgba(168, 85, 247, 0.38);
+        }
+        70% {
+          box-shadow: 0 0 0 16px rgba(34, 211, 238, 0), 0 18px 34px rgba(168, 85, 247, 0.38);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(34, 211, 238, 0), 0 18px 34px rgba(168, 85, 247, 0.38);
+        }
+      }
+
+      @media (max-width: 900px) {
+        body {
+          overflow: auto;
+        }
+
+        .app-shell {
+          display: flex;
+          flex-direction: column;
+          min-height: 100%;
+        }
+
+        .control-column {
+          border-bottom: 2px solid rgba(248, 113, 113, 0.45);
+          border-right: 0;
+          padding: 18px 16px;
+        }
+
+        .control-column::after {
+          bottom: -5px;
+          height: 5px;
+          left: 16px;
+          right: 16px;
+          top: auto;
+          width: auto;
+        }
+
+        .control-panel {
+          width: 100%;
+        }
+
+        .map-stage {
+          flex: 1 0 58vh;
+          min-height: 520px;
+        }
+
+        .world-map-panel {
+          min-width: 0;
+          width: 94%;
+        }
+      }
     </style>
   </head>
   <body>
-    <main class="relative h-full w-full">
-      <div id="map" aria-label="世界中のライブ音源を選べる地図"></div>
-
-      <!-- 半透明のコントロールパネル。スマホでは下部、PCでは左上に固定します。 -->
-      <section
-        class="control-panel absolute inset-x-4 bottom-4 rounded-3xl border border-white/15 bg-slate-950/75 p-5 text-white shadow-2xl shadow-cyan-950/40 backdrop-blur-xl md:bottom-auto md:left-6 md:right-auto md:top-6 md:w-[380px]"
-        aria-label="再生コントロール"
-      >
-        <div class="mb-5 flex items-start justify-between gap-4">
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-300">EchoMap</p>
-            <h1 class="mt-1 text-2xl font-bold tracking-tight">世界の音へジャンプ</h1>
+    <main class="app-shell">
+      <!-- 赤い境界線の左側は操作だけにし、地図は右側の領域へ固定表示します。 -->
+      <aside class="control-column" aria-label="再生コントロール">
+        <section class="control-panel rounded-3xl border border-white/15 bg-slate-950/75 p-5 text-white shadow-2xl shadow-cyan-950/40 backdrop-blur-xl">
+          <div class="mb-5 flex items-start justify-between gap-4">
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-300">EchoMap</p>
+              <h1 class="mt-1 text-2xl font-bold tracking-tight">世界の音へジャンプ</h1>
+            </div>
+            <span id="statusBadge" class="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold text-slate-300">
+              Standby
+            </span>
           </div>
-          <span id="statusBadge" class="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold text-slate-300">
-            Standby
-          </span>
-        </div>
 
-        <div class="rounded-2xl border border-white/10 bg-white/10 p-4">
-          <p class="text-sm text-slate-300">現在再生中</p>
-          <h2 id="cityName" class="mt-1 text-3xl font-black leading-tight">都市を選択</h2>
-          <p id="stationName" class="mt-1 text-sm font-medium text-cyan-200">
-            地図上のピンをクリックしてください
+          <div class="rounded-2xl border border-white/10 bg-white/10 p-4">
+            <p class="text-sm text-slate-300">現在再生中</p>
+            <h2 id="cityName" class="mt-1 text-3xl font-black leading-tight">都市を選択</h2>
+            <p id="stationName" class="mt-1 text-sm font-medium text-cyan-200">
+              右側の世界地図にあるピンをクリックしてください
+            </p>
+          </div>
+
+          <div class="mt-5 grid grid-cols-2 gap-3">
+            <button
+              id="toggleButton"
+              type="button"
+              class="rounded-2xl bg-cyan-400 px-4 py-3 font-bold text-slate-950 transition hover:bg-cyan-300 focus:outline-none focus:ring-4 focus:ring-cyan-300/35 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled
+            >
+              ▶ Play
+            </button>
+            <button
+              id="randomButton"
+              type="button"
+              class="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 font-bold transition hover:bg-white/20 focus:outline-none focus:ring-4 focus:ring-white/20"
+            >
+              Random Jump
+            </button>
+          </div>
+
+          <label class="mt-5 block text-sm font-semibold text-slate-200" for="volumeSlider">
+            音量 <span id="volumeValue" class="text-cyan-200">70%</span>
+          </label>
+          <input id="volumeSlider" class="mt-2 w-full" type="range" min="0" max="100" value="70" />
+
+          <p id="message" class="mt-4 min-h-5 text-xs leading-relaxed text-slate-300">
+            世界地図は固定画像として描画しています。タイル通信を使わないため、地図が歯抜けになりません。
           </p>
+        </section>
+      </aside>
+
+      <section class="map-stage" aria-label="固定表示の世界地図">
+        <div class="world-map-panel">
+          <div id="worldMap" class="world-map" role="img" aria-label="ラジオ配信地点をピンで示した世界地図">
+            <svg viewBox="0 0 1000 500" aria-hidden="true" focusable="false">
+              <rect width="1000" height="500" fill="rgba(2, 6, 23, 0.28)" />
+              <path class="land" d="M75 142 L119 105 L184 92 L236 114 L268 153 L252 205 L278 241 L247 280 L216 265 L196 313 L164 283 L143 232 L93 210 Z" />
+              <path class="land" d="M245 304 L285 342 L296 401 L271 470 L235 445 L218 389 L226 340 Z" />
+              <path class="land" d="M466 116 L548 88 L644 116 L709 160 L742 218 L707 257 L623 244 L576 276 L505 258 L462 207 Z" />
+              <path class="land" d="M494 239 L559 250 L610 307 L590 398 L552 459 L509 419 L474 339 Z" />
+              <path class="land" d="M677 220 L755 194 L835 210 L888 266 L858 326 L790 334 L740 291 Z" />
+              <path class="land" d="M786 342 L848 352 L892 398 L860 438 L803 430 L769 387 Z" />
+              <path class="land" d="M343 128 L394 105 L455 132 L435 175 L377 181 Z" />
+              <path class="land" d="M526 68 L600 55 L655 78 L609 102 L548 97 Z" />
+              <path class="land" d="M401 198 L447 184 L476 219 L456 259 L408 251 L388 220 Z" />
+              <path class="land" d="M180 84 L218 72 L244 89 L207 105 Z" />
+              <path class="land" d="M894 76 L953 91 L974 124 L938 145 L887 128 Z" />
+              <path class="country-line" d="M150 111 L176 164 L159 216 M215 116 L227 176 L252 205 M529 122 L515 192 L548 248 M619 118 L627 186 L676 222 M548 258 L531 332 L552 414 M764 215 L802 270 L790 334" />
+            </svg>
+            <div id="pinLayer" aria-label="ラジオ局のピン"></div>
+          </div>
         </div>
-
-        <div class="mt-5 grid grid-cols-2 gap-3">
-          <button
-            id="toggleButton"
-            type="button"
-            class="rounded-2xl bg-cyan-400 px-4 py-3 font-bold text-slate-950 transition hover:bg-cyan-300 focus:outline-none focus:ring-4 focus:ring-cyan-300/35 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled
-          >
-            ▶ Play
-          </button>
-          <button
-            id="randomButton"
-            type="button"
-            class="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 font-bold transition hover:bg-white/20 focus:outline-none focus:ring-4 focus:ring-white/20"
-          >
-            Random Jump
-          </button>
-        </div>
-
-        <label class="mt-5 block text-sm font-semibold text-slate-200" for="volumeSlider">
-          音量 <span id="volumeValue" class="text-cyan-200">70%</span>
-        </label>
-        <input id="volumeSlider" class="mt-2 w-full" type="range" min="0" max="100" value="70" />
-
-        <p id="message" class="mt-4 min-h-5 text-xs leading-relaxed text-slate-300">
-          ライブ配信は各放送局が提供するため、地域や時間帯によって再生できない場合があります。
-        </p>
+        <p class="map-caption">タイル地図を読み込まず、固定の世界地図上に配信地点のピンだけを配置しています。</p>
       </section>
     </main>
 
@@ -189,83 +414,6 @@
           },
         ];
 
-        const mapElement = document.querySelector("#map");
-        const worldBounds = L.latLngBounds([
-          [-85.05112878, -180],
-          [85.05112878, 180],
-        ]);
-
-        function calculateSingleWorldZoom() {
-          // Webメルカトル地図は「256px × 2^zoom」の正方形です。画面より世界地図が
-          // 小さいzoomを許すと、Leafletが右隣に世界のコピーを描き、つなぎ目が不自然に
-          // 見えます。画面を覆える最小の整数zoomを下限にして、世界のコピーを出しません。
-          const width = mapElement?.clientWidth || window.innerWidth;
-          const height = mapElement?.clientHeight || window.innerHeight;
-          const longestSide = Math.max(width, height);
-          return Math.max(2, Math.ceil(Math.log2(longestSide / 256)));
-        }
-
-        const initialZoom = calculateSingleWorldZoom();
-        const map = L.map("map", {
-          zoomControl: false,
-          maxBounds: worldBounds,
-          maxBoundsViscosity: 1,
-          minZoom: initialZoom,
-          zoomSnap: 1,
-          zoomDelta: 1,
-        }).setView([25, 10], initialZoom);
-
-        L.control.zoom({ position: "bottomright" }).addTo(map);
-
-        // CartoDB.DarkMatterタイルで、画面いっぱいのダークモード地図を表示します。
-        const baseTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-          attribution:
-            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-          bounds: worldBounds,
-          keepBuffer: 6,
-          maxZoom: 19,
-          noWrap: true,
-          updateWhenIdle: false,
-          updateWhenZooming: false,
-        }).addTo(map);
-
-        const tileRetryCounts = new WeakMap();
-        baseTiles.on("tileerror", (event) => {
-          const retryCount = tileRetryCounts.get(event.tile) || 0;
-          if (retryCount >= 2) return;
-
-          tileRetryCounts.set(event.tile, retryCount + 1);
-          window.setTimeout(() => {
-            const retryUrl = new URL(event.tile.src);
-            retryUrl.searchParams.set("retry", `${Date.now()}-${retryCount + 1}`);
-            event.tile.src = retryUrl.toString();
-          }, 350 * (retryCount + 1));
-        });
-
-        function applyResponsiveZoomFloor() {
-          const nextMinZoom = calculateSingleWorldZoom();
-          map.setMinZoom(nextMinZoom);
-
-          if (map.getZoom() < nextMinZoom) {
-            map.setZoom(nextMinZoom, { animate: false });
-          }
-        }
-
-        function refreshMapLayout() {
-          // 初期表示時や画面回転時にブラウザがまだレイアウト計算中だと、Leafletが地図
-          // コンテナを小さく見積もって一部のタイルだけを読み込むことがあります。実サイズ
-          // を再計算し、世界地図1枚で画面を覆えるzoom下限も更新して歯抜けと継ぎ目を防ぎます。
-          applyResponsiveZoomFloor();
-          map.invalidateSize({ pan: false });
-          map.panInsideBounds(worldBounds, { animate: false });
-        }
-
-        requestAnimationFrame(refreshMapLayout);
-        window.addEventListener("load", refreshMapLayout);
-        window.addEventListener("resize", refreshMapLayout);
-        setTimeout(refreshMapLayout, 250);
-        setTimeout(refreshMapLayout, 750);
-
         const audio = new Audio();
         audio.preload = "none";
         audio.volume = 0.7;
@@ -278,27 +426,53 @@
         const volumeSlider = document.querySelector("#volumeSlider");
         const volumeValue = document.querySelector("#volumeValue");
         const message = document.querySelector("#message");
+        const pinLayer = document.querySelector("#pinLayer");
 
         let currentSpot = null;
+        let activePin = null;
         let lastRandomIndex = -1;
 
-        const pinIcon = L.divIcon({
-          className: "",
-          html: '<div class="pulse-pin">◉</div>',
-          iconSize: [34, 34],
-          iconAnchor: [17, 17],
-          popupAnchor: [0, -18],
-        });
+        function escapeHtml(text) {
+          const replacementMap = {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#039;",
+          };
 
-        // ピンをクリックしたらselectSpotを呼び、前の音を止めて新しい音を再生します。
-        audioSpots.forEach((spot) => {
-          L.marker(spot.coordinates, { icon: pinIcon })
-            .addTo(map)
-            .bindPopup(
-              `<strong>${spot.city}</strong><br><span>${spot.station}</span><br><small>${spot.country}</small><br><a class="text-cyan-200 underline" href="${spot.sourceUrl}" target="_blank" rel="noopener noreferrer">配信元を見る</a>`,
-            )
-            .on("click", () => selectSpot(spot, true));
-        });
+          return `${text}`.replace(/[&<>"']/g, (character) => replacementMap[character]);
+        }
+
+        function projectCoordinates([latitude, longitude]) {
+          // 固定の世界地図は横方向を経度、縦方向を緯度に対応させる簡単な投影です。
+          // タイルを取りに行かないので、通信失敗による欠けは発生しません。
+          const x = ((longitude + 180) / 360) * 100;
+          const y = ((90 - latitude) / 180) * 100;
+          return { x, y };
+        }
+
+        function createPin(spot) {
+          const { x, y } = projectCoordinates(spot.coordinates);
+          const pin = document.createElement("button");
+          pin.type = "button";
+          pin.className = "map-pin";
+          pin.style.left = `${x}%`;
+          pin.style.top = `${y}%`;
+          pin.setAttribute("aria-label", `${spot.city}の${spot.station}を再生`);
+          pin.innerHTML = `
+            <span class="map-tooltip" aria-hidden="true">
+              <strong class="block text-sm">${escapeHtml(spot.city)}</strong>
+              <span class="block text-xs text-cyan-100">${escapeHtml(spot.station)}</span>
+              <span class="block text-[11px] text-slate-400">${escapeHtml(spot.country)}</span>
+            </span>
+          `;
+          pin.addEventListener("click", () => selectSpot(spot, true, pin));
+          pinLayer.appendChild(pin);
+          return pin;
+        }
+
+        const spotPins = new Map(audioSpots.map((spot) => [spot, createPin(spot)]));
 
         function updateStatus(text, styleClass) {
           statusBadge.textContent = text;
@@ -307,14 +481,26 @@
 
         function updateNowPlaying(spot) {
           cityName.textContent = spot.city;
-          stationName.textContent = `${spot.station} / ${spot.country}`;
+          stationName.innerHTML = `${escapeHtml(spot.station)} / ${escapeHtml(spot.country)} ・ <a class="spot-link" href="${spot.sourceUrl}" target="_blank" rel="noopener noreferrer">配信元を見る</a>`;
           toggleButton.disabled = false;
         }
 
-        async function selectSpot(spot, shouldAutoPlay) {
+        function highlightPin(pin) {
+          if (activePin) {
+            activePin.classList.remove("is-active");
+            activePin.setAttribute("aria-pressed", "false");
+          }
+
+          activePin = pin;
+          activePin.classList.add("is-active");
+          activePin.setAttribute("aria-pressed", "true");
+        }
+
+        async function selectSpot(spot, shouldAutoPlay, pin = spotPins.get(spot)) {
           currentSpot = spot;
           updateNowPlaying(spot);
-          message.textContent = `${spot.city} のライブ音源に接続しています。`;
+          highlightPin(pin);
+          message.textContent = `${spot.city} のライブ音源に接続しています。地図は固定したまま、再生地点のピンを光らせます。`;
 
           // srcを差し替える前に必ず停止し、同時に2つの音が鳴らないようにします。
           audio.pause();
@@ -322,7 +508,6 @@
           audio.src = spot.streamUrl;
           audio.load();
 
-          map.flyTo(spot.coordinates, 7, { duration: 1.35 });
           updateStatus("Ready", "bg-cyan-400/20 text-cyan-100");
           toggleButton.textContent = "▶ Play";
 
@@ -356,7 +541,7 @@
           toggleButton.textContent = "▶ Play";
           message.textContent = currentSpot
             ? `${currentSpot.city} の音源を一時停止しました。`
-            : "地図上のピンをクリックしてください。";
+            : "右側の世界地図にあるピンをクリックしてください。";
         }
 
         toggleButton.addEventListener("click", () => {
@@ -383,7 +568,8 @@
           }
 
           lastRandomIndex = randomIndex;
-          selectSpot(audioSpots[randomIndex], true);
+          const spot = audioSpots[randomIndex];
+          selectSpot(spot, true, spotPins.get(spot));
         });
 
         audio.addEventListener("playing", () => {
@@ -406,10 +592,6 @@
           message.textContent = "音声ストリームでエラーが発生しました。別の都市も試してみてください。";
           toggleButton.textContent = "▶ Play";
         });
-
-        setTimeout(() => {
-          map.invalidateSize();
-        }, 500);
       });
     </script>
   </body>
