@@ -122,6 +122,76 @@
       input[type="range"] {
         accent-color: #22d3ee;
       }
+
+      .now-playing-card {
+        overflow: hidden;
+        position: relative;
+      }
+
+      .now-playing-card::after {
+        background: radial-gradient(circle, rgba(0, 229, 255, 0.16), transparent 64%);
+        content: "";
+        height: 140px;
+        opacity: 0;
+        pointer-events: none;
+        position: absolute;
+        right: -36px;
+        top: 50%;
+        transform: translateY(-50%);
+        transition: opacity 0.35s ease;
+        width: 140px;
+      }
+
+      .now-playing-card.has-visualizer::after {
+        opacity: 1;
+      }
+
+      .audio-visualizer {
+        align-items: center;
+        align-self: stretch;
+        display: flex;
+        flex-shrink: 0;
+        gap: 5px;
+        height: 74px;
+        justify-content: center;
+        opacity: 0.42;
+        position: relative;
+        transition: opacity 0.35s ease, filter 0.35s ease;
+        width: 82px;
+        z-index: 1;
+      }
+
+      .audio-visualizer.is-active {
+        filter: drop-shadow(0 0 12px rgba(0, 229, 255, 0.72));
+        opacity: 1;
+      }
+
+      .visualizer-bar {
+        --level: 0.18;
+        background: linear-gradient(180deg, rgba(165, 243, 252, 0.98), #00e5ff 52%, rgba(14, 116, 144, 0.88));
+        border-radius: 9999px;
+        box-shadow: 0 0 10px rgba(0, 229, 255, 0.68), 0 0 24px rgba(0, 229, 255, 0.28);
+        height: calc(16px + (var(--level) * 48px));
+        min-height: 16px;
+        transform-origin: center;
+        transition: height 90ms linear, opacity 0.25s ease;
+        width: 5px;
+      }
+
+      .audio-visualizer:not(.is-active) .visualizer-bar {
+        opacity: 0.45;
+      }
+
+      @media (max-width: 420px) {
+        .audio-visualizer {
+          gap: 4px;
+          width: 62px;
+        }
+
+        .visualizer-bar {
+          width: 4px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -143,12 +213,25 @@
           </span>
         </div>
 
-        <div class="rounded-2xl border border-white/10 bg-white/10 p-4">
-          <p class="text-sm text-slate-300">現在再生中</p>
-          <h2 id="cityName" class="mt-1 text-3xl font-black leading-tight">都市を選択</h2>
-          <p id="stationName" class="mt-1 text-sm font-medium text-cyan-200">
-            地図上のピンをクリックしてください
-          </p>
+        <div id="nowPlayingCard" class="now-playing-card rounded-2xl border border-white/10 bg-white/10 p-4">
+          <div class="flex items-center justify-between gap-4">
+            <div class="min-w-0">
+              <p class="text-sm text-slate-300">現在再生中</p>
+              <h2 id="cityName" class="mt-1 truncate text-3xl font-black leading-tight">都市を選択</h2>
+              <p id="stationName" class="mt-1 truncate text-sm font-medium text-cyan-200">
+                地図上のピンをクリックしてください
+              </p>
+            </div>
+            <div id="audioVisualizer" class="audio-visualizer" aria-hidden="true">
+              <span class="visualizer-bar"></span>
+              <span class="visualizer-bar"></span>
+              <span class="visualizer-bar"></span>
+              <span class="visualizer-bar"></span>
+              <span class="visualizer-bar"></span>
+              <span class="visualizer-bar"></span>
+              <span class="visualizer-bar"></span>
+            </div>
+          </div>
         </div>
 
         <div class="mt-5 grid grid-cols-2 gap-3">
@@ -331,9 +414,18 @@
         const volumeSlider = document.querySelector("#volumeSlider");
         const volumeValue = document.querySelector("#volumeValue");
         const message = document.querySelector("#message");
+        const nowPlayingCard = document.querySelector("#nowPlayingCard");
+        const audioVisualizer = document.querySelector("#audioVisualizer");
+        const visualizerBars = [...document.querySelectorAll(".visualizer-bar")];
 
         let currentSpot = null;
         let lastRandomIndex = -1;
+        let audioContext = null;
+        let analyser = null;
+        let analyserData = null;
+        let audioSource = null;
+        let visualizerFrameId = null;
+        const visualizerLevels = visualizerBars.map(() => 0.18);
         const spotMarkers = new Map();
 
         const pinIcon = L.divIcon({
@@ -373,6 +465,106 @@
           toggleButton.disabled = false;
         }
 
+        function setupAudioAnalyser() {
+          if (analyser) return true;
+
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (!AudioContext) return false;
+
+          try {
+            audioContext = audioContext || new AudioContext();
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            analyser.smoothingTimeConstant = 0.84;
+            analyserData = new Uint8Array(analyser.frequencyBinCount);
+            audioSource = audioSource || audioContext.createMediaElementSource(audio);
+            audioSource.connect(analyser);
+            analyser.connect(audioContext.destination);
+            return true;
+          } catch (error) {
+            console.warn("Audio visualizer setup failed:", error);
+            analyser = null;
+            analyserData = null;
+            return false;
+          }
+        }
+
+        function setVisualizerActive(isActive) {
+          audioVisualizer.classList.toggle("is-active", isActive);
+          nowPlayingCard.classList.toggle("has-visualizer", isActive);
+
+          if (!isActive) {
+            visualizerBars.forEach((bar, index) => {
+              visualizerLevels[index] += (0.18 - visualizerLevels[index]) * 0.16;
+              bar.style.setProperty("--level", visualizerLevels[index].toFixed(3));
+            });
+          }
+        }
+
+        function drawVisualizer() {
+          if (audio.paused || audio.ended) {
+            setVisualizerActive(false);
+            visualizerFrameId = null;
+            return;
+          }
+
+          let hasSignal = false;
+
+          if (analyser && analyserData) {
+            analyser.getByteFrequencyData(analyserData);
+            const binSize = Math.max(1, Math.floor(analyserData.length / visualizerBars.length));
+
+            visualizerBars.forEach((bar, index) => {
+              const start = index * binSize;
+              const end = index === visualizerBars.length - 1 ? analyserData.length : start + binSize;
+              let sum = 0;
+
+              for (let i = start; i < end; i += 1) {
+                sum += analyserData[i];
+              }
+
+              const average = sum / Math.max(1, end - start);
+              hasSignal = hasSignal || average > 2;
+              const normalized = Math.min(1, average / 164);
+              const targetLevel = 0.16 + normalized * 0.84;
+              visualizerLevels[index] += (targetLevel - visualizerLevels[index]) * 0.28;
+              bar.style.setProperty("--level", visualizerLevels[index].toFixed(3));
+            });
+          }
+
+          // 一部のライブ配信はWeb Audio APIへ波形データを渡さないことがあります。
+          // その場合でも「再生中」であることが伝わるよう、音量値をベースにした滑らかな動きを出します。
+          if (!hasSignal) {
+            const time = performance.now() / 360;
+            visualizerBars.forEach((bar, index) => {
+              const wave = (Math.sin(time + index * 0.82) + Math.sin(time * 0.62 + index * 1.43) + 2) / 4;
+              const targetLevel = 0.18 + wave * audio.volume * 0.74;
+              visualizerLevels[index] += (targetLevel - visualizerLevels[index]) * 0.2;
+              bar.style.setProperty("--level", visualizerLevels[index].toFixed(3));
+            });
+          }
+
+          setVisualizerActive(true);
+          visualizerFrameId = requestAnimationFrame(drawVisualizer);
+        }
+
+        function startVisualizer() {
+          setVisualizerActive(true);
+
+          if (!visualizerFrameId) {
+            visualizerFrameId = requestAnimationFrame(drawVisualizer);
+          }
+        }
+
+        function stopVisualizer() {
+          if (visualizerFrameId) {
+            cancelAnimationFrame(visualizerFrameId);
+            visualizerFrameId = null;
+          }
+
+          setVisualizerActive(false);
+        }
+
         async function selectSpot(spot, shouldAutoPlay) {
           currentSpot = spot;
           updateNowPlaying(spot);
@@ -399,16 +591,24 @@
 
           try {
             updateStatus("Loading", "bg-amber-400/20 text-amber-100");
+            const hasAnalyser = setupAudioAnalyser();
+
+            if (hasAnalyser && audioContext?.state === "suspended") {
+              await audioContext.resume();
+            }
+
             await audio.play();
             updateStatus("Live", "bg-emerald-400/20 text-emerald-100");
             toggleButton.textContent = "⏸ Stop";
             setPlayingMarker(currentSpot);
+            startVisualizer();
             message.textContent = `${currentSpot.city} の ${currentSpot.station} を再生中です。`;
           } catch (error) {
             // ブラウザの自動再生制限や、放送局側の一時停止に備えてメッセージを出します。
             updateStatus("Blocked", "bg-rose-500/20 text-rose-100");
             toggleButton.textContent = "▶ Play";
             setPlayingMarker(null);
+            stopVisualizer();
             message.textContent =
               "再生できませんでした。もう一度Playを押すか、別の都市を試してください。";
             console.error("Audio playback failed:", error);
@@ -418,6 +618,7 @@
         function stopAudio() {
           audio.pause();
           setPlayingMarker(null);
+          stopVisualizer();
           updateStatus("Paused", "bg-slate-800 text-slate-300");
           toggleButton.textContent = "▶ Play";
           message.textContent = currentSpot
@@ -456,6 +657,7 @@
           updateStatus("Live", "bg-emerald-400/20 text-emerald-100");
           toggleButton.textContent = "⏸ Stop";
           setPlayingMarker(currentSpot);
+          startVisualizer();
         });
 
         audio.addEventListener("waiting", () => {
@@ -464,6 +666,7 @@
 
         audio.addEventListener("pause", () => {
           setPlayingMarker(null);
+          stopVisualizer();
 
           if (currentSpot) {
             updateStatus("Paused", "bg-slate-800 text-slate-300");
@@ -473,6 +676,7 @@
         audio.addEventListener("error", () => {
           updateStatus("Error", "bg-rose-500/20 text-rose-100");
           setPlayingMarker(null);
+          stopVisualizer();
           message.textContent = "音声ストリームでエラーが発生しました。別の都市も試してみてください。";
           toggleButton.textContent = "▶ Play";
         });
