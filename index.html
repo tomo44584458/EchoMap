@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EchoMap | 世界の音を旅する地図</title>
+
+    <!-- GitHub Pagesでそのまま動かせるように、CSS/JSはCDNから読み込みます。 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIINfQMcQPkGFg1q9dJxqH4HLyA6xXb8PUM="
+      crossorigin=""
+    />
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+      defer
+    ></script>
+
+    <style>
+      html,
+      body,
+      #map {
+        height: 100%;
+      }
+
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #020617;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      /* Leafletのポップアップもアプリ全体のダークな雰囲気に合わせます。 */
+      .leaflet-popup-content-wrapper,
+      .leaflet-popup-tip {
+        background: rgba(15, 23, 42, 0.95);
+        color: #e2e8f0;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+      }
+
+      .leaflet-popup-content {
+        margin: 14px 16px;
+      }
+
+      /* ピンを少し光らせ、夜の地図上でも見つけやすくします。 */
+      .pulse-pin {
+        align-items: center;
+        background: linear-gradient(135deg, #22d3ee, #a78bfa);
+        border: 2px solid rgba(255, 255, 255, 0.9);
+        border-radius: 9999px;
+        box-shadow: 0 0 0 8px rgba(34, 211, 238, 0.12), 0 12px 30px rgba(14, 165, 233, 0.35);
+        color: #0f172a;
+        display: flex;
+        font-size: 15px;
+        height: 34px;
+        justify-content: center;
+        width: 34px;
+      }
+
+      input[type="range"] {
+        accent-color: #22d3ee;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="relative h-full w-full">
+      <div id="map" aria-label="世界中のライブ音源を選べる地図"></div>
+
+      <!-- 半透明のコントロールパネル。スマホでは下部、PCでは左上に固定します。 -->
+      <section
+        class="absolute inset-x-4 bottom-4 z-[1000] rounded-3xl border border-white/15 bg-slate-950/75 p-5 text-white shadow-2xl shadow-cyan-950/40 backdrop-blur-xl md:bottom-auto md:left-6 md:right-auto md:top-6 md:w-[380px]"
+        aria-label="再生コントロール"
+      >
+        <div class="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.35em] text-cyan-300">EchoMap</p>
+            <h1 class="mt-1 text-2xl font-bold tracking-tight">世界の音へジャンプ</h1>
+          </div>
+          <span id="statusBadge" class="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold text-slate-300">
+            Standby
+          </span>
+        </div>
+
+        <div class="rounded-2xl border border-white/10 bg-white/10 p-4">
+          <p class="text-sm text-slate-300">現在再生中</p>
+          <h2 id="cityName" class="mt-1 text-3xl font-black leading-tight">都市を選択</h2>
+          <p id="stationName" class="mt-1 text-sm font-medium text-cyan-200">
+            地図上のピンをクリックしてください
+          </p>
+        </div>
+
+        <div class="mt-5 grid grid-cols-2 gap-3">
+          <button
+            id="toggleButton"
+            type="button"
+            class="rounded-2xl bg-cyan-400 px-4 py-3 font-bold text-slate-950 transition hover:bg-cyan-300 focus:outline-none focus:ring-4 focus:ring-cyan-300/35 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled
+          >
+            ▶ Play
+          </button>
+          <button
+            id="randomButton"
+            type="button"
+            class="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 font-bold transition hover:bg-white/20 focus:outline-none focus:ring-4 focus:ring-white/20"
+          >
+            Random Jump
+          </button>
+        </div>
+
+        <label class="mt-5 block text-sm font-semibold text-slate-200" for="volumeSlider">
+          音量 <span id="volumeValue" class="text-cyan-200">70%</span>
+        </label>
+        <input id="volumeSlider" class="mt-2 w-full" type="range" min="0" max="100" value="70" />
+
+        <p id="message" class="mt-4 min-h-5 text-xs leading-relaxed text-slate-300">
+          ライブ配信は各放送局が提供するため、地域や時間帯によって再生できない場合があります。
+        </p>
+      </section>
+    </main>
+
+    <script>
+      window.addEventListener("DOMContentLoaded", () => {
+        // 都市データはここにまとめています。新しい音源を足すときは、この配列に1件追加するだけです。
+        const audioSpots = [
+          {
+            city: "東京",
+            country: "Japan",
+            station: "J1 HITS",
+            coordinates: [35.6762, 139.6503],
+            streamUrl: "https://jenny.torontocast.com:2000/stream/J1HITS",
+            sourceUrl: "https://www.j1fm.tokyo/j1/developers/",
+          },
+          {
+            city: "ニューヨーク",
+            country: "United States",
+            station: "WNYC FM 93.9",
+            coordinates: [40.7128, -74.006],
+            streamUrl: "https://fm939.wnyc.org/wnycfm",
+            sourceUrl: "https://www.wnyc.org/radio/",
+          },
+          {
+            city: "ロンドン",
+            country: "United Kingdom",
+            station: "NTS Radio 1",
+            coordinates: [51.5074, -0.1278],
+            streamUrl: "https://stream-relay-geo.ntslive.net/stream",
+            sourceUrl: "https://www.nts.live/radio",
+          },
+          {
+            city: "パリ",
+            country: "France",
+            station: "FIP Radio",
+            coordinates: [48.8566, 2.3522],
+            streamUrl: "https://icecast.radiofrance.fr/fip-hifi.aac",
+            sourceUrl: "https://www.radiofrance.fr/fip",
+          },
+          {
+            city: "リオデジャネイロ",
+            country: "Brazil",
+            station: "JB FM Rio",
+            coordinates: [-22.9068, -43.1729],
+            streamUrl: "https://playerservices.streamtheworld.com/api/livestream-redirect/JBFMAAC.aac",
+            sourceUrl: "https://www.jbfm.com.br/",
+          },
+          {
+            city: "サンフランシスコ",
+            country: "United States",
+            station: "SomaFM Live",
+            coordinates: [37.7749, -122.4194],
+            streamUrl: "https://ice5.somafm.com/live-128-mp3",
+            sourceUrl: "https://somafm.com/live/directstreamlinks.html",
+          },
+        ];
+
+        const map = L.map("map", {
+          zoomControl: false,
+          worldCopyJump: true,
+        }).setView([25, 10], 2.4);
+
+        L.control.zoom({ position: "bottomright" }).addTo(map);
+
+        // CartoDB.DarkMatterタイルで、画面いっぱいのダークモード地図を表示します。
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+          maxZoom: 19,
+        }).addTo(map);
+
+        const audio = new Audio();
+        audio.preload = "none";
+        audio.volume = 0.7;
+
+        const cityName = document.querySelector("#cityName");
+        const stationName = document.querySelector("#stationName");
+        const statusBadge = document.querySelector("#statusBadge");
+        const toggleButton = document.querySelector("#toggleButton");
+        const randomButton = document.querySelector("#randomButton");
+        const volumeSlider = document.querySelector("#volumeSlider");
+        const volumeValue = document.querySelector("#volumeValue");
+        const message = document.querySelector("#message");
+
+        let currentSpot = null;
+        let lastRandomIndex = -1;
+
+        const pinIcon = L.divIcon({
+          className: "",
+          html: '<div class="pulse-pin">◉</div>',
+          iconSize: [34, 34],
+          iconAnchor: [17, 17],
+          popupAnchor: [0, -18],
+        });
+
+        // ピンをクリックしたらselectSpotを呼び、前の音を止めて新しい音を再生します。
+        audioSpots.forEach((spot) => {
+          L.marker(spot.coordinates, { icon: pinIcon })
+            .addTo(map)
+            .bindPopup(
+              `<strong>${spot.city}</strong><br><span>${spot.station}</span><br><small>${spot.country}</small><br><a class="text-cyan-200 underline" href="${spot.sourceUrl}" target="_blank" rel="noopener noreferrer">配信元を見る</a>`,
+            )
+            .on("click", () => selectSpot(spot, true));
+        });
+
+        function updateStatus(text, styleClass) {
+          statusBadge.textContent = text;
+          statusBadge.className = `rounded-full px-3 py-1 text-xs font-semibold ${styleClass}`;
+        }
+
+        function updateNowPlaying(spot) {
+          cityName.textContent = spot.city;
+          stationName.textContent = `${spot.station} / ${spot.country}`;
+          toggleButton.disabled = false;
+        }
+
+        async function selectSpot(spot, shouldAutoPlay) {
+          currentSpot = spot;
+          updateNowPlaying(spot);
+          message.textContent = `${spot.city} のライブ音源に接続しています。`;
+
+          // srcを差し替える前に必ず停止し、同時に2つの音が鳴らないようにします。
+          audio.pause();
+          audio.currentTime = 0;
+          audio.src = spot.streamUrl;
+          audio.load();
+
+          map.flyTo(spot.coordinates, 7, { duration: 1.35 });
+          updateStatus("Ready", "bg-cyan-400/20 text-cyan-100");
+          toggleButton.textContent = "▶ Play";
+
+          if (shouldAutoPlay) {
+            await playCurrentSpot();
+          }
+        }
+
+        async function playCurrentSpot() {
+          if (!currentSpot) return;
+
+          try {
+            updateStatus("Loading", "bg-amber-400/20 text-amber-100");
+            await audio.play();
+            updateStatus("Live", "bg-emerald-400/20 text-emerald-100");
+            toggleButton.textContent = "⏸ Stop";
+            message.textContent = `${currentSpot.city} の ${currentSpot.station} を再生中です。`;
+          } catch (error) {
+            // ブラウザの自動再生制限や、放送局側の一時停止に備えてメッセージを出します。
+            updateStatus("Blocked", "bg-rose-500/20 text-rose-100");
+            toggleButton.textContent = "▶ Play";
+            message.textContent =
+              "再生できませんでした。もう一度Playを押すか、別の都市を試してください。";
+            console.error("Audio playback failed:", error);
+          }
+        }
+
+        function stopAudio() {
+          audio.pause();
+          updateStatus("Paused", "bg-slate-800 text-slate-300");
+          toggleButton.textContent = "▶ Play";
+          message.textContent = currentSpot
+            ? `${currentSpot.city} の音源を一時停止しました。`
+            : "地図上のピンをクリックしてください。";
+        }
+
+        toggleButton.addEventListener("click", () => {
+          if (audio.paused) {
+            playCurrentSpot();
+          } else {
+            stopAudio();
+          }
+        });
+
+        volumeSlider.addEventListener("input", (event) => {
+          const volume = Number(event.target.value) / 100;
+          audio.volume = volume;
+          volumeValue.textContent = `${event.target.value}%`;
+        });
+
+        randomButton.addEventListener("click", () => {
+          // 連続で同じ都市を選びにくくして、旅をしている感覚を出します。
+          let randomIndex = Math.floor(Math.random() * audioSpots.length);
+          if (audioSpots.length > 1) {
+            while (randomIndex === lastRandomIndex) {
+              randomIndex = Math.floor(Math.random() * audioSpots.length);
+            }
+          }
+
+          lastRandomIndex = randomIndex;
+          selectSpot(audioSpots[randomIndex], true);
+        });
+
+        audio.addEventListener("playing", () => {
+          updateStatus("Live", "bg-emerald-400/20 text-emerald-100");
+          toggleButton.textContent = "⏸ Stop";
+        });
+
+        audio.addEventListener("waiting", () => {
+          updateStatus("Buffering", "bg-amber-400/20 text-amber-100");
+        });
+
+        audio.addEventListener("pause", () => {
+          if (currentSpot) {
+            updateStatus("Paused", "bg-slate-800 text-slate-300");
+          }
+        });
+
+        audio.addEventListener("error", () => {
+          updateStatus("Error", "bg-rose-500/20 text-rose-100");
+          message.textContent = "音声ストリームでエラーが発生しました。別の都市も試してみてください。";
+          toggleButton.textContent = "▶ Play";
+        });
+      });
+    </script>
+  </body>
+</html>
