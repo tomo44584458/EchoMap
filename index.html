@@ -26,17 +26,8 @@
         height: 100%;
       }
 
-      #map {
-        width: 100vw;
-        height: 100vh;
-        position: absolute;
-        top: 0;
-        left: 0;
-        z-index: 0;
-      }
-
-      .control-panel {
-        z-index: 10;
+      html {
+        overflow: hidden;
       }
 
       body {
@@ -45,6 +36,30 @@
         background: #020617;
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
           "Segoe UI", sans-serif;
+      }
+
+      main {
+        height: 100vh;
+        width: 100vw;
+      }
+
+      #map {
+        height: 100vh;
+        inset: 0;
+        position: fixed;
+        width: 100vw;
+        z-index: 0;
+      }
+
+      .leaflet-container img,
+      .leaflet-tile {
+        max-height: none !important;
+        max-width: none !important;
+      }
+
+      .control-panel {
+        position: fixed;
+        z-index: 1000;
       }
 
       /* Leafletのポップアップもアプリ全体のダークな雰囲気に合わせます。 */
@@ -85,7 +100,7 @@
 
       <!-- 半透明のコントロールパネル。スマホでは下部、PCでは左上に固定します。 -->
       <section
-        class="control-panel absolute inset-x-4 bottom-4 rounded-3xl border border-white/15 bg-slate-950/75 p-5 text-white shadow-2xl shadow-cyan-950/40 backdrop-blur-xl md:bottom-auto md:left-6 md:right-auto md:top-6 md:w-[380px]"
+        class="control-panel inset-x-4 bottom-4 rounded-3xl border border-white/15 bg-slate-950/75 p-5 text-white shadow-2xl shadow-cyan-950/40 backdrop-blur-xl md:bottom-auto md:left-6 md:right-auto md:top-6 md:w-[380px]"
         aria-label="再生コントロール"
       >
         <div class="mb-5 flex items-start justify-between gap-4">
@@ -263,6 +278,9 @@
         requestAnimationFrame(refreshMapLayout);
         window.addEventListener("load", refreshMapLayout);
         window.addEventListener("resize", refreshMapLayout);
+        window.addEventListener("orientationchange", () => {
+          setTimeout(refreshMapLayout, 150);
+        });
         setTimeout(refreshMapLayout, 250);
         setTimeout(refreshMapLayout, 750);
 
