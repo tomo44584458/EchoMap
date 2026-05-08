@@ -7,16 +7,24 @@
 
     <!-- GitHub Pagesでそのまま動かせるように、CSS/JSはCDNから読み込みます。 -->
     <script src="https://cdn.tailwindcss.com"></script>
+
+    <!--
+      Leaflet CSS
+      integrity属性の値がCDN側の実体とズレるとブラウザにブロックされるため、
+      今回は integrity / crossorigin を外しています。
+    -->
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIINfQMcQPkGFg1q9dJxqH4HLyA6xXb8PUM="
-      crossorigin=""
     />
+
+    <!--
+      Leaflet JS
+      CSS側と同じく、CDN読み込み時のintegrity不一致を避けるため、
+      integrity / crossorigin を外しています。
+    -->
     <script
       src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-      crossorigin=""
       defer
     ></script>
 
@@ -45,6 +53,19 @@
         background: #020617;
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
           "Segoe UI", sans-serif;
+      }
+
+      /*
+        Tailwindやブラウザ側のCSSリセットで img { max-width: 100%; } が効くと、
+        Leafletの地図タイル画像のサイズ計算が崩れることがあります。
+        タイル歯抜け・ズレ対策として、Leaflet内の画像は本来サイズで表示させます。
+      */
+      .leaflet-container img {
+        max-width: none;
+      }
+
+      .leaflet-tile {
+        max-width: none !important;
       }
 
       /* Leafletのポップアップもアプリ全体のダークな雰囲気に合わせます。 */
@@ -137,6 +158,12 @@
 
     <script>
       window.addEventListener("DOMContentLoaded", () => {
+        // Leaflet本体がCDNから読み込めなかった場合の保険です。
+        if (typeof L === "undefined") {
+          console.error("Leafletが読み込めていません。CDNの読み込み状況を確認してください。");
+          return;
+        }
+
         // 都市データはここにまとめています。新しい音源を足すときは、この配列に1件追加するだけです。
         const audioSpots = [
           {
